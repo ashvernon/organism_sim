@@ -29,6 +29,8 @@ def draw_food(screen: pygame.Surface, pellets: list[FoodPellet]) -> None:
 
 
 def draw_organism(screen: pygame.Surface, org: Organism, debug: bool = False) -> None:
+    debug_font = pygame.font.Font(None, 16) if debug else None
+
     # edges first
     for e in org.edges:
         a = org.nodes[e.a]
@@ -49,8 +51,14 @@ def draw_organism(screen: pygame.Surface, org: Organism, debug: bool = False) ->
         pygame.draw.circle(screen, col, (int(n.x), int(n.y)), int(n.radius))
         _draw_dir_indicator(screen, n.x, n.y, n.angle, n.radius + 4)
 
-        if debug:
+        if debug and debug_font is not None:
             # small id label
-            font = pygame.font.Font(None, 16)
-            txt = font.render(str(n.id), True, (230, 230, 230))
+            txt = debug_font.render(str(n.id), True, (230, 230, 230))
             screen.blit(txt, (n.x + n.radius + 2, n.y - n.radius - 2))
+
+    if debug and debug_font is not None:
+        cx, cy = org.center_of_mass()
+        energy_txt = debug_font.render(
+            f"E:{org.energy:.2f} cost:{org.last_actuator_cost:.3f}", True, (235, 235, 235)
+        )
+        screen.blit(energy_txt, (cx + 10, cy - 10))
