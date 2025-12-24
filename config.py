@@ -20,8 +20,11 @@ SIM_SPEED = 2  # simulation sub-steps per rendered frame
 SCREEN_W, SCREEN_H = 980, 720
 
 # Physics/brain tuning
-ENERGY_DRAIN_PER_SEC = 0.06
-EAT_REACH = 14.0
+ENERGY_DRAIN_PER_SEC = 0.02
+EAT_REACH = 18.0
+
+# Movement/actuation
+ACTUATOR_COST_SCALE = 0.12
 
 # Mutation
 MUT_P_WEIGHT = 0.12

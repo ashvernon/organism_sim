@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from typing import Dict
 
+import config
 from organism.organism import Organism
 from organism.nodes import NodeType
 
@@ -26,8 +27,8 @@ ANGULAR_DRAG = 0.86
 EDGE_SOLVER_ITERS = 2
 EDGE_STIFFNESS = 0.65
 
-# Cost scaling (tune 0.15–0.6 depending on how harsh you want it)
-THRUST_COST = 0.35
+# Cost scaling (tune via config for survivability/efficiency)
+THRUST_COST = config.ACTUATOR_COST_SCALE
 
 
 def apply_actuator_forces(org: Organism, actuator_outputs: Dict[int, float], dt: float) -> float:
