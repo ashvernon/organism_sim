@@ -13,6 +13,8 @@ import math
 import random
 from typing import List, Tuple
 
+import config
+
 
 @dataclass
 class FoodPellet:
@@ -67,15 +69,15 @@ class FoodField:
         self.pellets: List[FoodPellet] = []
 
         # spawn tuning
-        self.target_pellets = 220
+        self.target_pellets = config.FOOD_TARGET_PELLETS
 
-        self.clump_n_range = (4, 16)
+        self.clump_n_range = (6, 18)
         self.clump_spread_range = (18.0, 60.0)  # pixels
-        self.radius_range = (2.0, 6.0)
-        self.lifespan_range = (10.0, 200.0)
+        self.radius_range = config.FOOD_RADIUS_RANGE
+        self.lifespan_range = config.FOOD_LIFESPAN_RANGE
 
         self.spawn_accum = 0.0
-        self.spawn_rate = 0.9  # clumps per second (approx)
+        self.spawn_rate = config.FOOD_SPAWN_RATE  # clumps per second (approx)
 
     def update(self, dt: float) -> None:
         # age & cull
