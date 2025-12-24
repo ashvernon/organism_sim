@@ -6,10 +6,13 @@ Organism container: nodes + edges + basic update hook.
 
 from __future__ import annotations
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from organism.nodes import Node, NodeType
 from organism.edges import Edge
+
+if TYPE_CHECKING:
+    from neural.brain import Brain
 
 
 @dataclass
@@ -20,6 +23,7 @@ class Organism:
 
     energy: float = 10.0
     age: int = 0
+    brain: Optional["Brain"] = None
 
     def add_node(
         self,
@@ -57,3 +61,27 @@ class Organism:
 
     def actuator_ids(self) -> List[int]:
         return [n.id for n in self.nodes.values() if n.type == NodeType.ACTUATOR]
+
+    def clone_with_brain(self) -> "Organism":
+        clone = Organism()
+        for node in self.nodes.values():
+            clone.nodes[node.id] = Node(
+                id=node.id,
+                type=node.type,
+                x=node.x,
+                y=node.y,
+                angle=node.angle,
+                radius=node.radius,
+                vx=node.vx,
+                vy=node.vy,
+                ang_v=node.ang_v,
+                energy=node.energy,
+                age=node.age,
+            )
+        clone.edges = [Edge(a=e.a, b=e.b, rest_length=e.rest_length) for e in self.edges]
+        clone.next_node_id = self.next_node_id
+        clone.energy = self.energy
+        clone.age = self.age
+        if self.brain is not None:
+            clone.brain = self.brain.clone()
+        return clone
