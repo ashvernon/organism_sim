@@ -67,7 +67,7 @@ class FoodField:
         self.pellets: List[FoodPellet] = []
 
         # spawn tuning
-        self.target_pellets = 220
+        self.target_pellets = 320
 
         self.clump_n_range = (4, 16)
         self.clump_spread_range = (18.0, 60.0)  # pixels
@@ -75,7 +75,7 @@ class FoodField:
         self.lifespan_range = (10.0, 200.0)
 
         self.spawn_accum = 0.0
-        self.spawn_rate = 0.9  # clumps per second (approx)
+        self.spawn_rate = 1.3  # clumps per second (approx)
 
     def update(self, dt: float) -> None:
         # age & cull

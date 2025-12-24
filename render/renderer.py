@@ -62,3 +62,20 @@ def draw_organism(screen: pygame.Surface, org: Organism, debug: bool = False) ->
             f"E:{org.energy:.2f} cost:{org.last_actuator_cost:.3f}", True, (235, 235, 235)
         )
         screen.blit(energy_txt, (cx + 10, cy - 10))
+
+
+def draw_hud(screen: pygame.Surface, stats: dict) -> None:
+    font = pygame.font.Font(None, 26)
+
+    lines = [
+        f"Population: {stats.get('population', 0)}",
+        f"Births: {stats.get('births', 0)}  Deaths: {stats.get('deaths', 0)}",
+        f"Avg energy: {stats.get('avg_energy', 0.0):.2f}",
+        f"Sim time: {stats.get('sim_time', 0.0):.1f}s",
+    ]
+
+    y = 10
+    for line in lines:
+        txt = font.render(line, True, (235, 235, 235))
+        screen.blit(txt, (12, y))
+        y += 22
