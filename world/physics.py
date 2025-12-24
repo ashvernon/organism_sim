@@ -48,7 +48,9 @@ def apply_actuator_forces(org: Organism, actuator_outputs: Dict[int, float], dt:
             continue
 
         thrust = max(-1.0, min(1.0, float(thrust)))
-        cost_accum += abs(thrust) * dt
+        # Larger actuators should incur higher energetic cost to mimic heavier muscles
+        radius_scale = max(node.radius, 1.0)
+        cost_accum += abs(thrust) * dt * radius_scale
 
         fx = math.cos(node.angle) * thrust * ACTUATOR_FORCE
         fy = math.sin(node.angle) * thrust * ACTUATOR_FORCE

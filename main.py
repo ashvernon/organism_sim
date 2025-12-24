@@ -141,7 +141,9 @@ def eval_one(individual: Individual, seconds: float = 20.0, seed: int = 0) -> fl
         b.step()
         actuator_outputs = b.motor_outputs_for_actuators()
 
-        apply_actuator_forces(org, actuator_outputs, dt)
+        cost = apply_actuator_forces(org, actuator_outputs, dt)
+        org.last_actuator_cost = cost
+        org.energy = max(0.0, org.energy - cost)
         solve_edges(org)
         apply_drag(org)
         clamp_speed(org, max_speed=420.0, max_ang=5.0)
@@ -300,7 +302,9 @@ def main():
 
                 actuator_outputs = org.brain.motor_outputs_for_actuators()
 
-                apply_actuator_forces(org, actuator_outputs, dt)
+                cost = apply_actuator_forces(org, actuator_outputs, dt)
+                org.last_actuator_cost = cost
+                org.energy = max(0.0, org.energy - cost)
                 solve_edges(org)
                 apply_drag(org)
                 clamp_speed(org, max_speed=420.0, max_ang=5.0)
@@ -324,8 +328,22 @@ def main():
                 draw_organism(screen, org, debug=debug)
 
             # overlay text
+            avg_energy = (
+                sum(o.energy for o in preview_orgs) / len(preview_orgs) if preview_orgs else 0.0
+            )
+            avg_thrust_cost = (
+                sum(o.last_actuator_cost for o in preview_orgs) / len(preview_orgs)
+                if preview_orgs
+                else 0.0
+            )
+
             font = pygame.font.Font(None, 26)
-            txt = font.render(f"Gen {generation}  Best fitness: {best_ind.fitness:.2f}", True, (235, 235, 235))
+            txt = font.render(
+                f"Gen {generation}  Best fitness: {best_ind.fitness:.2f}  "
+                f"Energy: {avg_energy:.2f}  Thrust cost: {avg_thrust_cost:.3f}",
+                True,
+                (235, 235, 235),
+            )
             screen.blit(txt, (12, 10))
 
             pygame.display.flip()

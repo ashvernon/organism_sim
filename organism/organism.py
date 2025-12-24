@@ -24,6 +24,7 @@ class Organism:
     energy: float = 10.0
     age: int = 0
     brain: Optional["Brain"] = None
+    last_actuator_cost: float = 0.0
 
     def add_node(
         self,
@@ -82,6 +83,7 @@ class Organism:
         clone.next_node_id = self.next_node_id
         clone.energy = self.energy
         clone.age = self.age
+        clone.last_actuator_cost = self.last_actuator_cost
         if self.brain is not None:
             clone.brain = self.brain.clone()
         return clone
