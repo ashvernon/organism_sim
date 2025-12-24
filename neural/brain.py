@@ -33,6 +33,9 @@ class Brain:
     # convenience: names -> neuron_id
     named: Dict[str, int] = field(default_factory=dict)
 
+    # bookkeeping: actuator node id -> motor neuron id
+    actuator_motors: Dict[int, int] = field(default_factory=dict)
+
     def clone(self) -> "Brain":
         return copy.deepcopy(self)
 
@@ -63,6 +66,56 @@ class Brain:
 
     def add_synapse(self, src: int, dst: int, weight: float) -> None:
         self.synapses.append(Synapse(src=src, dst=dst, weight=weight))
+
+    def ensure_sensor(self, name: str, node_id: int | None = None) -> int:
+        """
+        Ensure a sensor neuron with the given name (and optional body node mapping).
+        Returns the neuron id.
+        """
+        existing = self.named.get(name)
+        if existing is not None:
+            return existing
+
+        return self.add_neuron(NeuronType.SENSOR, node_id=node_id, name=name)
+
+    def ensure_motor_for_actuator(self, node_id: int) -> int:
+        """
+        Create a motor neuron (plus minimal wiring) for the given actuator node.
+        Returns the motor neuron id.
+        """
+        existing = self.actuator_motors.get(node_id)
+        if existing is not None and existing in self.neurons:
+            return existing
+
+        # attempt to reuse any motor already tagged with this node_id
+        for n in self.neurons.values():
+            if n.type == NeuronType.MOTOR and n.node_id == node_id:
+                self.actuator_motors[node_id] = n.id
+                return n.id
+
+        idx = len(self.actuator_motors)
+        mid = self.add_neuron(NeuronType.MOTOR, bias=0.0, node_id=node_id, name=f"motor_{node_id}")
+        self.actuator_motors[node_id] = mid
+
+        # minimal starter wiring: connect to hidden pair if present, otherwise oscillator if present
+        h1 = self.named.get("h1")
+        h2 = self.named.get("h2")
+        osc_sin = self.named.get("osc_sin")
+        osc_cos = self.named.get("osc_cos")
+
+        if h1 is not None and h2 is not None:
+            if idx % 2 == 0:
+                self.add_synapse(h1, mid, 1.0)
+                self.add_synapse(h2, mid, -0.8)
+            else:
+                self.add_synapse(h1, mid, -1.0)
+                self.add_synapse(h2, mid, 0.8)
+        elif osc_sin is not None and osc_cos is not None:
+            phase = 1.0 if idx % 2 == 0 else -1.0
+            self.add_synapse(osc_sin, mid, phase)
+            self.add_synapse(osc_cos, mid, 0.5)
+
+        return mid
 
     def set_sensor(self, name: str, value: float) -> None:
         nid = self.named.get(name)
@@ -140,6 +193,7 @@ class Brain:
         motor_ids: List[int] = []
         for i, node_id in enumerate(actuator_node_ids):
             mid = b.add_neuron(NeuronType.MOTOR, bias=0.0, node_id=node_id, name=f"motor_{node_id}")
+            b.actuator_motors[node_id] = mid
             motor_ids.append(mid)
 
         # Wire hidden -> motors; alternate phase to create turning motion
@@ -158,7 +212,14 @@ class Brain:
         Returns: {actuator_node_id: thrust [-1,1]}
         """
         out: Dict[int, float] = {}
+        for node_id, motor_id in self.actuator_motors.items():
+            n = self.neurons.get(motor_id)
+            if n is None:
+                continue
+            out[node_id] = max(-1.0, min(1.0, n.value))
+
+        # fallback: include any motors that aren't tracked in actuator_motors
         for n in self.neurons.values():
-            if n.type == NeuronType.MOTOR and n.node_id is not None:
+            if n.type == NeuronType.MOTOR and n.node_id is not None and n.node_id not in out:
                 out[n.node_id] = max(-1.0, min(1.0, n.value))
         return out

@@ -4,12 +4,7 @@ organism_sim module: organism/growth.py
 Growth execution:
 - Applies Genome rules to an Organism
 - Tracks per-rule cooldowns per organism
-- Performs simple "budding" from an anchor node
-
-Important:
-- Brain adaptation (adding motor/sensor neurons) is NOT done here.
-  Keep growth purely morphological. Your main loop or evolution layer
-  should call brain.ensure_* after growth.
+- Performs simple "budding" from an anchor node and wires new body IO into the brain
 """
 
 from __future__ import annotations
@@ -132,9 +127,13 @@ def try_apply_growth(org: Organism, genome: Genome, state: GrowthState, dt: floa
     angle_abs = anchor.angle + rule.angle
 
     if rule.op == GrowOp.BUD_ACTUATOR:
-        _spawn_bud(org, anchor_id, angle_abs, rule.length, NodeType.ACTUATOR, radius=rule.radius)
+        new_node_id = _spawn_bud(org, anchor_id, angle_abs, rule.length, NodeType.ACTUATOR, radius=rule.radius)
+        if org.brain is not None:
+            org.brain.ensure_motor_for_actuator(new_node_id)
     elif rule.op == GrowOp.BUD_SENSOR:
-        _spawn_bud(org, anchor_id, angle_abs, rule.length, NodeType.SENSOR, radius=rule.radius)
+        new_node_id = _spawn_bud(org, anchor_id, angle_abs, rule.length, NodeType.SENSOR, radius=rule.radius)
+        if org.brain is not None:
+            org.brain.ensure_sensor(f"sensor_{new_node_id}", node_id=new_node_id)
     elif rule.op == GrowOp.BUD_SEGMENT:
         _spawn_bud(org, anchor_id, angle_abs, rule.length, NodeType.SEGMENT, radius=rule.radius)
     else:
