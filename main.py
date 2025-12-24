@@ -17,6 +17,7 @@ import pygame
 from neural.brain import Brain
 from organism.organism import Organism
 from organism.nodes import NodeType
+from organism.genome import Genome
 from world.world import World
 from world.physics import apply_actuator_forces, solve_edges, apply_drag, clamp_speed, wrap_world
 from render.renderer import draw_organism, draw_food
@@ -142,7 +143,8 @@ def main():
     dummy_org, a1, a2 = make_demo_organism(SCREEN_W / 2, SCREEN_H / 2)
     base_brain = Brain.build_starter([a1, a2], seed=1)
 
-    population = [Individual(brain=base_brain.clone(), fitness=0.0) for _ in range(POP_SIZE)]
+    base_genome = Genome.starter()
+    population = [Individual(brain=base_brain.clone(), genome=base_genome.clone(), fitness=0.0) for _ in range(POP_SIZE)]
 
     generation = 0
     best_ind = population[0]

@@ -8,10 +8,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List
 
+from neural.brain import Brain
+from organism.genome import Genome
+
 
 @dataclass
 class Individual:
-    brain: object
+    brain: Brain
+    genome: Genome
     fitness: float = 0.0
 
 

@@ -9,7 +9,7 @@ import random
 from typing import List
 
 from evolution.selection import Individual
-from evolution.mutate import mutate_brain_params
+from evolution.mutate import mutate_brain_params, mutate_genome
 
 
 def next_generation(
@@ -26,13 +26,14 @@ def next_generation(
 
     # keep exact elite brains (cloned to avoid accidental mutation)
     for e in elites:
-        new_pop.append(Individual(brain=e.brain.clone(), fitness=0.0))
+        new_pop.append(Individual(brain=e.brain.clone(), genome=e.genome.clone(), fitness=0.0))
 
     # fill rest
     while len(new_pop) < pop_size:
         parent = random.choice(elites)
         child_brain = parent.brain.clone()
+        child_genome = mutate_genome(parent.genome)
         mutate_brain_params(child_brain, p_weight=p_weight, p_bias=p_bias, sigma=sigma)
-        new_pop.append(Individual(brain=child_brain, fitness=0.0))
+        new_pop.append(Individual(brain=child_brain, genome=child_genome, fitness=0.0))
 
     return new_pop[:pop_size]
