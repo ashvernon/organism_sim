@@ -15,9 +15,11 @@ import random
 import pygame
 
 from neural.brain import Brain
+from neural.neuron import NeuronType
 from organism.organism import Organism
 from organism.nodes import NodeType
 from organism.genome import Genome
+from organism.growth import GrowthState, try_apply_growth
 from world.world import World
 from world.physics import (
     apply_actuator_forces,
@@ -57,15 +59,67 @@ def make_demo_organism(cx: float, cy: float) -> tuple[Organism, int, int]:
     return org, a1.id, a2.id
 
 
-def eval_one(brain: Brain, seconds: float = 20.0, seed: int = 0) -> float:
+def ensure_brain_body_io(org: Organism) -> None:
+    """
+    Add motor neurons for new actuators (and simple sensor stubs when body sensors appear).
+    """
+    if org.brain is None:
+        return
+
+    actuator_ids = org.actuator_ids()
+    brain = org.brain
+
+    existing_motor_nodes = {
+        n.node_id
+        for n in brain.neurons.values()
+        if n.type == NeuronType.MOTOR and n.node_id is not None
+    }
+
+    for idx, act_id in enumerate(actuator_ids):
+        if act_id in existing_motor_nodes:
+            continue
+
+        mid = brain.add_neuron(NeuronType.MOTOR, bias=0.0, node_id=act_id, name=f"motor_{act_id}")
+        h1 = brain.named.get("h1")
+        h2 = brain.named.get("h2")
+        osc_sin = brain.named.get("osc_sin")
+        osc_cos = brain.named.get("osc_cos")
+
+        if h1 is not None and h2 is not None:
+            if idx % 2 == 0:
+                brain.add_synapse(h1, mid, 1.0)
+                brain.add_synapse(h2, mid, -0.8)
+            else:
+                brain.add_synapse(h1, mid, -1.0)
+                brain.add_synapse(h2, mid, 0.8)
+        elif osc_sin is not None and osc_cos is not None:
+            phase = 1.0 if idx % 2 == 0 else -1.0
+            brain.add_synapse(osc_sin, mid, phase)
+            brain.add_synapse(osc_cos, mid, 0.5)
+
+    existing_sensor_nodes = {
+        n.node_id
+        for n in brain.neurons.values()
+        if n.type == NeuronType.SENSOR and n.node_id is not None
+    }
+    for sensor_node in [n for n in org.nodes.values() if n.type == NodeType.SENSOR]:
+        if sensor_node.id in existing_sensor_nodes:
+            continue
+        brain.add_neuron(NeuronType.SENSOR, node_id=sensor_node.id, name=f"sensor_{sensor_node.id}")
+
+
+def eval_one(individual: Individual, seconds: float = 20.0, seed: int = 0) -> float:
     """
     Headless evaluation (no rendering):
     fitness = total food energy consumed over the episode
     """
     random.seed(seed)
-    org, a1, a2 = make_demo_organism(SCREEN_W / 2, SCREEN_H / 2)
-    # clone so evaluation can't mutate the population's stored brain
-    b = brain.clone()
+    org, _, _ = make_demo_organism(SCREEN_W / 2, SCREEN_H / 2)
+    # clone so evaluation can't mutate the population's stored networks
+    b = individual.brain.clone()
+    org.brain = b
+    genome = individual.genome
+    growth_state = GrowthState(time_since_last_global=genome.grow_interval)
 
     world = World.create(SCREEN_W, SCREEN_H)
 
@@ -80,6 +134,13 @@ def eval_one(brain: Brain, seconds: float = 20.0, seed: int = 0) -> float:
         # energy drain (keeps pressure to eat)
         org.energy = max(0.0, org.energy - 0.002)
         energy01 = max(0.0, min(1.0, org.energy / 10.0))
+
+        grew = try_apply_growth(org, genome, growth_state, dt)
+        if grew:
+            ensure_brain_body_io(org)
+            solve_edges(org)
+            apply_drag(org)
+            clamp_speed(org, max_speed=420.0, max_ang=5.0)
 
         cx, cy = org.center_of_mass()
         nearest, dist = world.food.nearest_pellet(cx, cy)
@@ -164,7 +225,7 @@ def main():
         # ---- Evaluate population (headless) ----
         for i, ind in enumerate(population):
             # same env seed for fairness across individuals
-            ind.fitness = eval_one(ind.brain, seconds=EPISODE_SECONDS, seed=12345)
+            ind.fitness = eval_one(ind, seconds=EPISODE_SECONDS, seed=12345)
             # allow quit during long eval
             for e in pygame.event.get():
                 if e.type == pygame.QUIT:
@@ -194,6 +255,8 @@ def main():
         # Run a short visible rollout of the best for ~3 seconds
         world = World.create(SCREEN_W, SCREEN_H)
         preview_orgs: list[Organism] = []
+        preview_genomes: list[Genome] = []
+        preview_growth: list[GrowthState] = []
         for i in range(PREVIEW_COUNT):
             parent = elites[i % len(elites)]
             org, a1, a2 = make_demo_organism(
@@ -202,6 +265,8 @@ def main():
             )
             org.brain = parent.brain.clone()
             preview_orgs.append(org)
+            preview_genomes.append(parent.genome.clone())
+            preview_growth.append(GrowthState(time_since_last_global=preview_genomes[-1].grow_interval))
 
         preview_secs = 3.0
         t0 = pygame.time.get_ticks() / 1000.0
@@ -224,9 +289,16 @@ def main():
             draw_food(screen, world.food.pellets)
             now = pygame.time.get_ticks() / 1000.0
 
-            for org in preview_orgs:
+            for idx, org in enumerate(preview_orgs):
                 org.energy = max(0.0, org.energy - 0.002)
                 energy01 = max(0.0, min(1.0, org.energy / 10.0))
+
+                grew = try_apply_growth(org, preview_genomes[idx], preview_growth[idx], dt)
+                if grew:
+                    ensure_brain_body_io(org)
+                    solve_edges(org)
+                    apply_drag(org)
+                    clamp_speed(org, max_speed=420.0, max_ang=5.0)
 
                 cx, cy = org.center_of_mass()
                 nearest, dist = world.food.nearest_pellet(cx, cy)
