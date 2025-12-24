@@ -1,19 +1,15 @@
 """
-organism_sim module: main.py
-
-Evolution MVP:
-- evaluate N organisms for 20 seconds each (solo)
-- fitness = food energy consumed
-- select top K elites
-- reproduce via mutated clones
-- render best individual each generation
+Continuous live simulation: organisms eat, reproduce, and evolve in real time.
 """
 
 from __future__ import annotations
 import math
 import random
+from dataclasses import dataclass
+from typing import List
 import pygame
 
+import config
 from neural.brain import Brain
 from organism.organism import Organism
 from organism.nodes import NodeType
@@ -28,14 +24,18 @@ from world.physics import (
     wrap_world,
     separate_organisms,
 )
-from render.renderer import draw_organism, draw_food
+from render.renderer import draw_organism, draw_food, draw_hud
 from render import colors
 
-from evolution.selection import Individual, select_top
-from evolution.reproduction import next_generation
+from evolution.reproduction import clone_for_spawn
 
-SCREEN_W, SCREEN_H = 980, 720
-PREVIEW_COUNT = 20
+
+@dataclass
+class LiveAgent:
+    organism: Organism
+    genome: Genome
+    growth: GrowthState
+    age: float = 0.0
 
 
 def wrap_angle(a: float) -> float:
@@ -74,282 +74,193 @@ def ensure_brain_body_io(org: Organism) -> None:
         brain.ensure_sensor(f"sensor_{sensor_node.id}", node_id=sensor_node.id)
 
 
-def eval_one(individual: Individual, seconds: float = 20.0, seed: int = 0) -> float:
-    """
-    Headless evaluation (no rendering):
-    fitness = total food energy consumed over the episode
-    """
-    random.seed(seed)
-    org, _, _ = make_demo_organism(SCREEN_W / 2, SCREEN_H / 2)
-    # clone so evaluation can't mutate the population's stored networks
-    b = individual.brain.clone()
-    org.brain = b
-    genome = individual.genome
+def build_agent(x: float, y: float, base_brain: Brain, genome: Genome) -> LiveAgent:
+    org, _, _ = make_demo_organism(x, y)
+    org.brain = base_brain.clone()
+    ensure_brain_body_io(org)
     growth_state = GrowthState(time_since_last_global=genome.grow_interval)
+    return LiveAgent(organism=org, genome=genome.clone(), growth=growth_state)
 
-    world = World.create(SCREEN_W, SCREEN_H)
 
-    dt = 1.0 / 30.0
-    steps = int(seconds / dt)
+def sense_food(org: Organism, world: World) -> tuple[float, float, float]:
+    cx, cy = org.center_of_mass()
+    nearest, dist = world.food.nearest_pellet(cx, cy)
 
-    food_eaten_total = 0.0
+    core_node = next(n for n in org.nodes.values() if n.type == NodeType.CORE)
+    heading = core_node.angle
 
-    for step in range(steps):
-        world.update(dt)
+    if nearest is None:
+        return 0.0, 1.0, 0.0
 
-        # energy drain (keeps pressure to eat)
-        org.energy = max(0.0, org.energy - 0.002)
-        energy01 = max(0.0, min(1.0, org.energy / 10.0))
+    dx = nearest.x - cx
+    dy = nearest.y - cy
+    abs_angle = math.atan2(dy, dx)
+    rel = wrap_angle(abs_angle - heading)
+    food_sin = math.sin(rel)
+    food_cos = math.cos(rel)
+    sense_range = 260.0
+    food_dist = max(0.0, 1.0 - min(1.0, dist / sense_range))
+    return food_sin, food_cos, food_dist
 
-        grew = try_apply_growth(org, genome, growth_state, dt)
-        if grew:
-            ensure_brain_body_io(org)
-            solve_edges(org)
-            apply_drag(org)
-            clamp_speed(org, max_speed=420.0, max_ang=5.0)
 
-        cx, cy = org.center_of_mass()
-        nearest, dist = world.food.nearest_pellet(cx, cy)
+def step_agent(agent: LiveAgent, world: World, dt: float, osc_t: float) -> float:
+    org = agent.organism
+    org.energy = max(0.0, org.energy - config.ENERGY_DRAIN_PER_SEC * dt)
+    energy01 = max(0.0, min(1.0, org.energy / 10.0))
 
-        core_node = next(n for n in org.nodes.values() if n.type == NodeType.CORE)
-        heading = core_node.angle
-
-        if nearest is None:
-            food_sin = 0.0
-            food_cos = 1.0
-            food_dist = 0.0
-        else:
-            dx = nearest.x - cx
-            dy = nearest.y - cy
-            abs_angle = math.atan2(dy, dx)
-            rel = wrap_angle(abs_angle - heading)
-            food_sin = math.sin(rel)
-            food_cos = math.cos(rel)
-            sense_range = 260.0
-            food_dist = max(0.0, 1.0 - min(1.0, dist / sense_range))
-
-        now = step * dt
-        osc = now * 2.0
-
-        b.set_sensor("energy", energy01)
-        b.set_sensor("osc_sin", math.sin(osc))
-        b.set_sensor("osc_cos", math.cos(osc))
-        b.set_sensor("food_sin", food_sin)
-        b.set_sensor("food_cos", food_cos)
-        b.set_sensor("food_dist", food_dist)
-
-        b.step()
-        actuator_outputs = b.motor_outputs_for_actuators()
-
-        cost = apply_actuator_forces(org, actuator_outputs, dt)
-        org.last_actuator_cost = cost
-        org.energy = max(0.0, org.energy - cost)
+    grew = try_apply_growth(org, agent.genome, agent.growth, dt)
+    if grew:
+        ensure_brain_body_io(org)
         solve_edges(org)
         apply_drag(org)
         clamp_speed(org, max_speed=420.0, max_ang=5.0)
 
-        org.update_kinematics(dt)
-        wrap_world(org, SCREEN_W, SCREEN_H, margin=60)
+    food_sin, food_cos, food_dist = sense_food(org, world)
 
-        gained = world.food.eat_near(cx, cy, reach=14)
-        if gained > 0:
-            food_eaten_total += gained
-            org.energy = min(10.0, org.energy + gained)
+    if org.brain is None:
+        return 0.0
 
-    return float(food_eaten_total)
+    org.brain.set_sensor("energy", energy01)
+    org.brain.set_sensor("osc_sin", math.sin(osc_t * 2.0))
+    org.brain.set_sensor("osc_cos", math.cos(osc_t * 2.0))
+    org.brain.set_sensor("food_sin", food_sin)
+    org.brain.set_sensor("food_cos", food_cos)
+    org.brain.set_sensor("food_dist", food_dist)
+    org.brain.step()
+
+    actuator_outputs = org.brain.motor_outputs_for_actuators()
+
+    cost = apply_actuator_forces(org, actuator_outputs, dt)
+    org.last_actuator_cost = cost
+    org.energy = max(0.0, org.energy - cost)
+    solve_edges(org)
+    apply_drag(org)
+    clamp_speed(org, max_speed=420.0, max_ang=5.0)
+
+    org.update_kinematics(dt)
+    wrap_world(org, config.SCREEN_W, config.SCREEN_H, margin=60)
+
+    cx, cy = org.center_of_mass()
+    gained = world.food.eat_near(cx, cy, reach=config.EAT_REACH)
+    if gained > 0:
+        org.energy = min(12.0, org.energy + gained)
+
+    agent.age += dt
+    return gained
+
+
+def spawn_child(parent: LiveAgent) -> LiveAgent:
+    child_spawn = clone_for_spawn(
+        parent.organism,
+        parent.genome,
+        jitter=config.CHILD_SPAWN_JITTER,
+        p_weight=config.MUT_P_WEIGHT,
+        p_bias=config.MUT_P_BIAS,
+        sigma=config.MUT_SIGMA,
+    )
+    child_spawn.organism.energy = config.REPRO_COST
+    ensure_brain_body_io(child_spawn.organism)
+    growth = GrowthState(time_since_last_global=child_spawn.genome.grow_interval)
+    return LiveAgent(organism=child_spawn.organism, genome=child_spawn.genome, growth=growth)
+
+
+def cull_excess(population: List[LiveAgent], deaths: int) -> int:
+    if len(population) <= config.MAX_POP:
+        return deaths
+    population.sort(key=lambda a: a.organism.energy)
+    overflow = len(population) - config.MAX_POP
+    del population[:overflow]
+    return deaths + overflow
 
 
 def main():
     pygame.init()
-    screen = pygame.display.set_mode((SCREEN_W, SCREEN_H))
-    pygame.display.set_caption("organism_sim (Evolution MVP)")
+    screen = pygame.display.set_mode((config.SCREEN_W, config.SCREEN_H))
+    pygame.display.set_caption("organism_sim (Live Evolution)")
     clock = pygame.time.Clock()
 
-    POP_SIZE = 60           # 30–100
-    ELITES = 8
-    EPISODE_SECONDS = 20.0
-
-    # Mutation tuning
-    MUT_P_WEIGHT = 0.12
-    MUT_P_BIAS = 0.10
-    MUT_SIGMA = 0.30
-
-    # Build initial population
-    # NOTE: assumes your Brain.build_starter creates the food sensors already
-    # (energy, osc_sin, osc_cos, food_sin, food_cos, food_dist + motors)
-    dummy_org, a1, a2 = make_demo_organism(SCREEN_W / 2, SCREEN_H / 2)
+    _, a1, a2 = make_demo_organism(config.SCREEN_W / 2, config.SCREEN_H / 2)
     base_brain = Brain.build_starter([a1, a2], seed=1)
-
     base_genome = Genome.starter()
-    population = [Individual(brain=base_brain.clone(), genome=base_genome.clone(), fitness=0.0) for _ in range(POP_SIZE)]
 
-    generation = 0
-    best_ind = population[0]
+    world = World.create(config.SCREEN_W, config.SCREEN_H)
 
-    running = True
-    while running:
-        generation += 1
-
-        # ---- Evaluate population (headless) ----
-        for i, ind in enumerate(population):
-            # same env seed for fairness across individuals
-            ind.fitness = eval_one(ind, seconds=EPISODE_SECONDS, seed=12345)
-            # allow quit during long eval
-            for e in pygame.event.get():
-                if e.type == pygame.QUIT:
-                    running = False
-                    break
-            if not running:
-                break
-
-        if not running:
-            break
-
-        elites = select_top(population, ELITES)
-        best_ind = elites[0]
-
-        print(f"Gen {generation:03d} | best fitness={best_ind.fitness:.3f} | avg={sum(i.fitness for i in population)/len(population):.3f}")
-
-        # ---- Produce next generation ----
-        population = next_generation(
-            elites,
-            pop_size=POP_SIZE,
-            p_weight=MUT_P_WEIGHT,
-            p_bias=MUT_P_BIAS,
-            sigma=MUT_SIGMA,
+    agents: List[LiveAgent] = []
+    for _ in range(config.START_POP):
+        agents.append(
+            build_agent(
+                random.uniform(80.0, config.SCREEN_W - 80.0),
+                random.uniform(80.0, config.SCREEN_H - 80.0),
+                base_brain,
+                base_genome,
+            )
         )
 
-        # ---- Render the best (live preview) ----
-        # Run a short visible rollout of the best for ~3 seconds
-        world = World.create(SCREEN_W, SCREEN_H)
-        preview_orgs: list[Organism] = []
-        preview_genomes: list[Genome] = []
-        preview_growth: list[GrowthState] = []
-        for i in range(PREVIEW_COUNT):
-            parent = elites[i % len(elites)]
-            org, a1, a2 = make_demo_organism(
-                random.uniform(50.0, SCREEN_W - 50.0),
-                random.uniform(50.0, SCREEN_H - 50.0),
-            )
-            org.brain = parent.brain.clone()
-            preview_orgs.append(org)
-            preview_genomes.append(parent.genome.clone())
-            preview_growth.append(GrowthState(time_since_last_global=preview_genomes[-1].grow_interval))
+    births = 0
+    deaths = 0
+    sim_time = 0.0
+    debug = False
+    running = True
 
-        preview_secs = 3.0
-        t0 = pygame.time.get_ticks() / 1000.0
-        debug = False
+    while running:
+        dt_frame = clock.tick(60) / 1000.0
+        dt_frame = min(dt_frame, 1 / 30)
 
-        while running:
-            dt = clock.tick(60) / 1000.0
-            dt = min(dt, 1 / 30)
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                running = False
+            elif e.type == pygame.KEYDOWN and e.key == pygame.K_TAB:
+                debug = not debug
 
-            for e in pygame.event.get():
-                if e.type == pygame.QUIT:
-                    running = False
-                elif e.type == pygame.KEYDOWN:
-                    if e.key == pygame.K_TAB:
-                        debug = not debug
+        sub_steps = max(1, config.SIM_SPEED)
+        dt = dt_frame / sub_steps
 
+        for _ in range(sub_steps):
+            sim_time += dt
             world.update(dt)
 
-            screen.fill(colors.BG)
-            draw_food(screen, world.food.pellets)
-            now = pygame.time.get_ticks() / 1000.0
+            for agent in list(agents):
+                step_agent(agent, world, dt, sim_time)
 
-            for idx, org in enumerate(preview_orgs):
-                org.energy = max(0.0, org.energy - 0.002)
-                energy01 = max(0.0, min(1.0, org.energy / 10.0))
+            separate_organisms([a.organism for a in agents])
 
-                grew = try_apply_growth(org, preview_genomes[idx], preview_growth[idx], dt)
-                if grew:
-                    ensure_brain_body_io(org)
-                    solve_edges(org)
-                    apply_drag(org)
-                    clamp_speed(org, max_speed=420.0, max_ang=5.0)
-
-                cx, cy = org.center_of_mass()
-                nearest, dist = world.food.nearest_pellet(cx, cy)
-                core_node = next(n for n in org.nodes.values() if n.type == NodeType.CORE)
-                heading = core_node.angle
-
-                if nearest is None:
-                    food_sin = 0.0
-                    food_cos = 1.0
-                    food_dist = 0.0
+            # Death conditions
+            survivors: List[LiveAgent] = []
+            for agent in agents:
+                if agent.organism.energy <= config.DEATH_ENERGY_FLOOR or agent.age >= config.MAX_AGE_SECONDS:
+                    deaths += 1
                 else:
-                    dx = nearest.x - cx
-                    dy = nearest.y - cy
-                    abs_angle = math.atan2(dy, dx)
-                    rel = wrap_angle(abs_angle - heading)
-                    food_sin = math.sin(rel)
-                    food_cos = math.cos(rel)
-                    sense_range = 260.0
-                    food_dist = max(0.0, 1.0 - min(1.0, dist / sense_range))
+                    survivors.append(agent)
+            agents = survivors
 
-                osc = now * 2.0
+            # Reproduction pass
+            new_agents: List[LiveAgent] = []
+            for agent in agents:
+                if agent.organism.energy >= config.REPRO_ENERGY_THRESHOLD and len(agents) + len(new_agents) < config.MAX_POP:
+                    agent.organism.energy -= config.REPRO_COST
+                    new_agents.append(spawn_child(agent))
+                    births += 1
+            agents.extend(new_agents)
 
-                if org.brain is None:
-                    continue
+            deaths = cull_excess(agents, deaths)
 
-                org.brain.set_sensor("energy", energy01)
-                org.brain.set_sensor("osc_sin", math.sin(osc))
-                org.brain.set_sensor("osc_cos", math.cos(osc))
-                org.brain.set_sensor("food_sin", food_sin)
-                org.brain.set_sensor("food_cos", food_cos)
-                org.brain.set_sensor("food_dist", food_dist)
-                org.brain.step()
+        # Render
+        screen.fill(colors.BG)
+        draw_food(screen, world.food.pellets)
+        for agent in agents:
+            draw_organism(screen, agent.organism, debug=debug)
 
-                actuator_outputs = org.brain.motor_outputs_for_actuators()
+        avg_energy = sum(a.organism.energy for a in agents) / len(agents) if agents else 0.0
+        stats = {
+            "population": len(agents),
+            "births": births,
+            "deaths": deaths,
+            "avg_energy": avg_energy,
+            "sim_time": sim_time,
+        }
+        draw_hud(screen, stats)
 
-                cost = apply_actuator_forces(org, actuator_outputs, dt)
-                org.last_actuator_cost = cost
-                org.energy = max(0.0, org.energy - cost)
-                solve_edges(org)
-                apply_drag(org)
-                clamp_speed(org, max_speed=420.0, max_ang=5.0)
-
-                org.update_kinematics(dt)
-
-            separate_organisms(preview_orgs)
-
-            for org in preview_orgs:
-                wrap_world(org, SCREEN_W, SCREEN_H, margin=60)
-
-                cx, cy = org.center_of_mass()
-
-                gained = world.food.eat_near(cx, cy, reach=14)
-                if gained > 0:
-                    org.energy = min(10.0, org.energy + gained)
-
-                if org.brain is None:
-                    continue
-
-                draw_organism(screen, org, debug=debug)
-
-            # overlay text
-            avg_energy = (
-                sum(o.energy for o in preview_orgs) / len(preview_orgs) if preview_orgs else 0.0
-            )
-            avg_thrust_cost = (
-                sum(o.last_actuator_cost for o in preview_orgs) / len(preview_orgs)
-                if preview_orgs
-                else 0.0
-            )
-
-            font = pygame.font.Font(None, 26)
-            txt = font.render(
-                f"Gen {generation}  Best fitness: {best_ind.fitness:.2f}  "
-                f"Energy: {avg_energy:.2f}  Thrust cost: {avg_thrust_cost:.3f}",
-                True,
-                (235, 235, 235),
-            )
-            screen.blit(txt, (12, 10))
-
-            pygame.display.flip()
-
-            if (pygame.time.get_ticks() / 1000.0) - t0 >= preview_secs:
-                break
+        pygame.display.flip()
 
     pygame.quit()
 
