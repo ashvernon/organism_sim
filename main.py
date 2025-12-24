@@ -15,7 +15,6 @@ import random
 import pygame
 
 from neural.brain import Brain
-from neural.neuron import NeuronType
 from organism.organism import Organism
 from organism.nodes import NodeType
 from organism.genome import Genome
@@ -68,44 +67,11 @@ def ensure_brain_body_io(org: Organism) -> None:
 
     actuator_ids = org.actuator_ids()
     brain = org.brain
+    for act_id in actuator_ids:
+        brain.ensure_motor_for_actuator(act_id)
 
-    existing_motor_nodes = {
-        n.node_id
-        for n in brain.neurons.values()
-        if n.type == NeuronType.MOTOR and n.node_id is not None
-    }
-
-    for idx, act_id in enumerate(actuator_ids):
-        if act_id in existing_motor_nodes:
-            continue
-
-        mid = brain.add_neuron(NeuronType.MOTOR, bias=0.0, node_id=act_id, name=f"motor_{act_id}")
-        h1 = brain.named.get("h1")
-        h2 = brain.named.get("h2")
-        osc_sin = brain.named.get("osc_sin")
-        osc_cos = brain.named.get("osc_cos")
-
-        if h1 is not None and h2 is not None:
-            if idx % 2 == 0:
-                brain.add_synapse(h1, mid, 1.0)
-                brain.add_synapse(h2, mid, -0.8)
-            else:
-                brain.add_synapse(h1, mid, -1.0)
-                brain.add_synapse(h2, mid, 0.8)
-        elif osc_sin is not None and osc_cos is not None:
-            phase = 1.0 if idx % 2 == 0 else -1.0
-            brain.add_synapse(osc_sin, mid, phase)
-            brain.add_synapse(osc_cos, mid, 0.5)
-
-    existing_sensor_nodes = {
-        n.node_id
-        for n in brain.neurons.values()
-        if n.type == NeuronType.SENSOR and n.node_id is not None
-    }
     for sensor_node in [n for n in org.nodes.values() if n.type == NodeType.SENSOR]:
-        if sensor_node.id in existing_sensor_nodes:
-            continue
-        brain.add_neuron(NeuronType.SENSOR, node_id=sensor_node.id, name=f"sensor_{sensor_node.id}")
+        brain.ensure_sensor(f"sensor_{sensor_node.id}", node_id=sensor_node.id)
 
 
 def eval_one(individual: Individual, seconds: float = 20.0, seed: int = 0) -> float:
