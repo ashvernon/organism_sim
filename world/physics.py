@@ -126,3 +126,45 @@ def wrap_world(org: Organism, w: int, h: int, margin: int = 60) -> None:
             n.y = h + margin
         elif n.y > h + margin:
             n.y = -margin
+
+
+def separate_organisms(
+    organisms,
+    radius: float = 18.0,
+    strength: float = 0.35,
+):
+    """
+    Apply a soft positional push between organisms that get too close together.
+    """
+
+    r2 = radius * radius
+
+    for i in range(len(organisms)):
+        a = organisms[i]
+        ax, ay = a.center_of_mass()
+
+        for j in range(i + 1, len(organisms)):
+            b = organisms[j]
+            bx, by = b.center_of_mass()
+
+            dx = bx - ax
+            dy = by - ay
+            d2 = dx * dx + dy * dy
+
+            if d2 <= 1e-6 or d2 > r2:
+                continue
+
+            d = math.sqrt(d2)
+            overlap = radius - d
+            push = overlap / radius * strength
+
+            nx = dx / d
+            ny = dy / d
+
+            for n in a.nodes.values():
+                n.x -= nx * push
+                n.y -= ny * push
+
+            for n in b.nodes.values():
+                n.x += nx * push
+                n.y += ny * push

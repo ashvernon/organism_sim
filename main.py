@@ -19,7 +19,14 @@ from organism.organism import Organism
 from organism.nodes import NodeType
 from organism.genome import Genome
 from world.world import World
-from world.physics import apply_actuator_forces, solve_edges, apply_drag, clamp_speed, wrap_world
+from world.physics import (
+    apply_actuator_forces,
+    solve_edges,
+    apply_drag,
+    clamp_speed,
+    wrap_world,
+    separate_organisms,
+)
 from render.renderer import draw_organism, draw_food
 from render import colors
 
@@ -261,11 +268,20 @@ def main():
                 clamp_speed(org, max_speed=420.0, max_ang=5.0)
 
                 org.update_kinematics(dt)
+
+            separate_organisms(preview_orgs)
+
+            for org in preview_orgs:
                 wrap_world(org, SCREEN_W, SCREEN_H, margin=60)
+
+                cx, cy = org.center_of_mass()
 
                 gained = world.food.eat_near(cx, cy, reach=14)
                 if gained > 0:
                     org.energy = min(10.0, org.energy + gained)
+
+                if org.brain is None:
+                    continue
 
                 draw_organism(screen, org, debug=debug)
 
