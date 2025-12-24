@@ -27,6 +27,7 @@ from evolution.selection import Individual, select_top
 from evolution.reproduction import next_generation
 
 SCREEN_W, SCREEN_H = 980, 720
+PREVIEW_COUNT = 20
 
 
 def wrap_angle(a: float) -> float:
@@ -184,9 +185,16 @@ def main():
 
         # ---- Render the best (live preview) ----
         # Run a short visible rollout of the best for ~3 seconds
-        org, a1, a2 = make_demo_organism(SCREEN_W / 2, SCREEN_H / 2)
-        brain = best_ind.brain.clone()
         world = World.create(SCREEN_W, SCREEN_H)
+        preview_orgs: list[Organism] = []
+        for i in range(PREVIEW_COUNT):
+            parent = elites[i % len(elites)]
+            org, a1, a2 = make_demo_organism(
+                random.uniform(50.0, SCREEN_W - 50.0),
+                random.uniform(50.0, SCREEN_H - 50.0),
+            )
+            org.brain = parent.brain.clone()
+            preview_orgs.append(org)
 
         preview_secs = 3.0
         t0 = pygame.time.get_ticks() / 1000.0
@@ -205,56 +213,61 @@ def main():
 
             world.update(dt)
 
-            org.energy = max(0.0, org.energy - 0.002)
-            energy01 = max(0.0, min(1.0, org.energy / 10.0))
-
-            cx, cy = org.center_of_mass()
-            nearest, dist = world.food.nearest_pellet(cx, cy)
-            core_node = next(n for n in org.nodes.values() if n.type == NodeType.CORE)
-            heading = core_node.angle
-
-            if nearest is None:
-                food_sin = 0.0
-                food_cos = 1.0
-                food_dist = 0.0
-            else:
-                dx = nearest.x - cx
-                dy = nearest.y - cy
-                abs_angle = math.atan2(dy, dx)
-                rel = wrap_angle(abs_angle - heading)
-                food_sin = math.sin(rel)
-                food_cos = math.cos(rel)
-                sense_range = 260.0
-                food_dist = max(0.0, 1.0 - min(1.0, dist / sense_range))
-
-            now = pygame.time.get_ticks() / 1000.0
-            osc = now * 2.0
-
-            brain.set_sensor("energy", energy01)
-            brain.set_sensor("osc_sin", math.sin(osc))
-            brain.set_sensor("osc_cos", math.cos(osc))
-            brain.set_sensor("food_sin", food_sin)
-            brain.set_sensor("food_cos", food_cos)
-            brain.set_sensor("food_dist", food_dist)
-            brain.step()
-
-            actuator_outputs = brain.motor_outputs_for_actuators()
-
-            apply_actuator_forces(org, actuator_outputs, dt)
-            solve_edges(org)
-            apply_drag(org)
-            clamp_speed(org, max_speed=420.0, max_ang=5.0)
-
-            org.update_kinematics(dt)
-            wrap_world(org, SCREEN_W, SCREEN_H, margin=60)
-
-            gained = world.food.eat_near(cx, cy, reach=14)
-            if gained > 0:
-                org.energy = min(10.0, org.energy + gained)
-
             screen.fill(colors.BG)
             draw_food(screen, world.food.pellets)
-            draw_organism(screen, org, debug=debug)
+            now = pygame.time.get_ticks() / 1000.0
+
+            for org in preview_orgs:
+                org.energy = max(0.0, org.energy - 0.002)
+                energy01 = max(0.0, min(1.0, org.energy / 10.0))
+
+                cx, cy = org.center_of_mass()
+                nearest, dist = world.food.nearest_pellet(cx, cy)
+                core_node = next(n for n in org.nodes.values() if n.type == NodeType.CORE)
+                heading = core_node.angle
+
+                if nearest is None:
+                    food_sin = 0.0
+                    food_cos = 1.0
+                    food_dist = 0.0
+                else:
+                    dx = nearest.x - cx
+                    dy = nearest.y - cy
+                    abs_angle = math.atan2(dy, dx)
+                    rel = wrap_angle(abs_angle - heading)
+                    food_sin = math.sin(rel)
+                    food_cos = math.cos(rel)
+                    sense_range = 260.0
+                    food_dist = max(0.0, 1.0 - min(1.0, dist / sense_range))
+
+                osc = now * 2.0
+
+                if org.brain is None:
+                    continue
+
+                org.brain.set_sensor("energy", energy01)
+                org.brain.set_sensor("osc_sin", math.sin(osc))
+                org.brain.set_sensor("osc_cos", math.cos(osc))
+                org.brain.set_sensor("food_sin", food_sin)
+                org.brain.set_sensor("food_cos", food_cos)
+                org.brain.set_sensor("food_dist", food_dist)
+                org.brain.step()
+
+                actuator_outputs = org.brain.motor_outputs_for_actuators()
+
+                apply_actuator_forces(org, actuator_outputs, dt)
+                solve_edges(org)
+                apply_drag(org)
+                clamp_speed(org, max_speed=420.0, max_ang=5.0)
+
+                org.update_kinematics(dt)
+                wrap_world(org, SCREEN_W, SCREEN_H, margin=60)
+
+                gained = world.food.eat_near(cx, cy, reach=14)
+                if gained > 0:
+                    org.energy = min(10.0, org.energy + gained)
+
+                draw_organism(screen, org, debug=debug)
 
             # overlay text
             font = pygame.font.Font(None, 26)
