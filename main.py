@@ -106,7 +106,7 @@ def sense_food(org: Organism, world: World) -> tuple[float, float, float]:
 def step_agent(agent: LiveAgent, world: World, dt: float, osc_t: float) -> float:
     org = agent.organism
     org.energy = max(0.0, org.energy - config.ENERGY_DRAIN_PER_SEC * dt)
-    energy01 = max(0.0, min(1.0, org.energy / 10.0))
+    energy01 = max(0.0, min(1.0, org.energy / config.MAX_ENERGY))
 
     grew = try_apply_growth(org, agent.genome, agent.growth, dt)
     if grew:
@@ -143,7 +143,7 @@ def step_agent(agent: LiveAgent, world: World, dt: float, osc_t: float) -> float
     cx, cy = org.center_of_mass()
     gained = world.food.eat_near(cx, cy, reach=config.EAT_REACH)
     if gained > 0:
-        org.energy = min(12.0, org.energy + gained)
+        org.energy = min(config.MAX_ENERGY, org.energy + gained)
 
     agent.age += dt
     return gained
